@@ -7,38 +7,35 @@ const int minorPin = 2;
 const int offsetPin = 3;
 const int potPin = A0;
 const int dacPin = A12;
+const float gainError = 1.011f;
+const float offsetError = 5.558f;
 
-/* 
- * These are the values to divide the readings of the pitch knob to get 2 octaves worth of notes. Use different values  
- * depending on if you are reading at 10-bit or 12-bit.
- * 42 for chromatic, 73 for diatonic @ 10-bit
- * 164 for chromatic, 274 for diatonic @ 12-bit
- */
-const int chromaticDiv = 164;
-const int diatonicDiv = 274;
-const int voltOffset = 1241;
+// values used to divide up the knob into 2 octaves
+const int adcResolution = 1 << 12; // 12 bits
+const int dacResolution = 1 << 12; // 12 bits
+const int chromaticDiv = (adcResolution / 25) + 1;
+const int diatonicDiv = (adcResolution / 15) + 1;
+// sometimes a small offset is needed to align the center detent with 1 octave
+const int knobOffset = 0;
 
 unsigned int dacVal = 0; // start on 0v
 unsigned int targetVal = 0;
 unsigned int diff = 0;
 int knob = 0;
-int noteNum = 0; // a value from 0-24 or 0-14, depending on scale, representing 2 octaves + a final note
+int noteIndex = 0; // a value from 0-24 or 0-14, depending on scale, representing 2 octaves + a final note
+int noteNum = 0; // a value from 0-36, representing a semi-tone value
 int currentScale = 0; // chromatic
 
 int knobDiv = chromaticDiv; // start in chromatic
 int vOffset = 0; // start at 0v, use 1241 to start at 1v
 int slew = 4; // 4ms delay for slew, you can play with this or add a pot to control it. 0 will result in stepping, and I found 10 is as high as you'd want to go.
 
-/*
- * These are scale note values calculated to output proper pitches following the 1v/oct standard when using a 12-bit DAC.
- */
+// scale offsets to be used to calculate DAC value
 unsigned int scales[3][25] = {
-  { 0, 103, 206, 310, 413, 517, 620, 724, 827, 930, 1034, 1137, 1241, 1344, 1448, 1551, 1654, 1758, 1861, 1965, 2068, 2172, 2275, 2378, 2482 },
-  { 0, 206, 413, 517, 724, 930, 1137, 1241, 1448, 1654, 1758, 1965, 2172, 2378, 2484 },
-  { 0, 206, 310, 517, 724, 827, 1034, 1241, 1448, 1551, 1758, 1965, 2068, 2275, 2484 }
+  { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24},
+  { 0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19, 21, 23, 24 },
+  { 0, 2, 3, 5, 7, 8, 10, 12, 14, 15, 17, 19, 20, 22, 24 }
 };
-
-
 
 void setup() {
   pinMode(majorPin, INPUT_PULLUP); // minor scale
@@ -52,7 +49,7 @@ void setup() {
 
 void loop() {
   // read offest switch and set offset accordingly
-  vOffset = digitalRead(offsetPin) * voltOffset;
+  // vOffset = digitalRead(offsetPin) * voltOffset;
 
   // read scale switch inputs and set knob division and scale index accordingly
   // scale switch is a 3 position, on-off-on switch, using two inputs for major and minor, and chromatic if neither
@@ -71,9 +68,13 @@ void loop() {
 
   // read knob position and determine what number note it is in the 2 octaves
   knob = analogRead(potPin);
-  noteNum = floor(knob / knobDiv);
+  noteIndex = floor(knob / knobDiv);
+  // Serial.println(string(knob) - 
   // find the target value that corresponds to the voltage for the note number from the scale look up 
-  targetVal = scales[currentScale][noteNum] + vOffset;
+  // add octave offset if enabled
+  noteNum = scales[currentScale][noteIndex] + (digitalRead(offsetPin) * 12);
+  // convert from note number to code point
+  targetVal = ((((float)noteNum / 12.0f) / 3.3f) * (dacResolution - 1) * gainError) + offsetError;
 
   /* glide to the note, the further away it is from our current DAC values the more we will glide to it */
 
@@ -86,7 +87,7 @@ void loop() {
       // jump by half the difference
       dacVal = dacVal + (diff / 10);
       delay(slew);
-      //Serial.println(String(knob) + " - " + String(noteNum + 1) + " - " + String(dacVal) + " - " + String(targetVal));
+      // Serial.println(String(knob) + " - " + String(noteIndex + 1) + " - " + String(dacVal) + " - " + String(targetVal));
     } else {
       // set it to our target
       dacVal = targetVal;
@@ -102,7 +103,7 @@ void loop() {
       // jump by half the difference
       dacVal = dacVal - (diff / 10);
       delay(slew);
-      //Serial.println(String(knob) + " - " + String(noteNum + 1) + " - " + String(dacVal) + " - " + String(targetVal));
+      // Serial.println(String(knob) + " - " + String(noteIndex + 1) + " - " + String(dacVal) + " - " + String(targetVal));
     } else {
       // set it to our target
       dacVal = targetVal;
